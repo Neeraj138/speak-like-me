@@ -1,0 +1,6 @@
+[14/09/2026, 9:10:11 AM] Alex Example: Can you send it to alex@example.test?
+[14/09/2026, 9:11:03 AM] Demo User: yeah, ill send it after the Example Robotics call
+[14/09/2026, 9:12:00 AM] Alex Example: My number is +91 98765 43210.
+[14/09/2026, 9:13:14 AM] Demo User: got it. Project Firefly is at https://private.example.test/firefly
+this is a multiline message
+

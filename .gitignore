@@ -1,0 +1,35 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.venv-*/
+.cache/
+dist/
+build/
+artifacts/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Local agent, credential, and editor state.
+.agents/
+.aws/
+.codex/
+.env
+.env.*
+
+# Personal testing exports and local model/training outputs.
+my-testing/
+*.gguf
+*.safetensors
+*.bin
+*.zip
+
+# Never commit personal exports or generated datasets by default.
+data/
+private/
+*.private.json
+*.private.toml
+
+# Synthetic fixtures are safe and intentionally tracked.
+!examples/synthetic/
+!examples/synthetic/**

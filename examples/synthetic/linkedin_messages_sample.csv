@@ -1,0 +1,4 @@
+CONVERSATION ID,FROM,TO,DATE,SUBJECT,CONTENT
+conversation-one,Recruiter Example,Demo User,2026-09-10 10:00:00,Role,Can you share your email?
+conversation-one,Demo User,Recruiter Example,2026-09-10 10:05:00,Role,"sure, use demo@example.test"
+conversation-two,Unselected Person,Demo User,2026-09-11 12:00:00,Other,This conversation should not be selected

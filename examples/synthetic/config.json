@@ -1,0 +1,13 @@
+{
+  "self_names": ["Demo User"],
+  "custom_entities": {
+    "company": ["Example Robotics"],
+    "project": ["Project Firefly"],
+    "location": ["Example Nagar"]
+  },
+  "allowed_terms": ["Python"],
+  "redact_urls": true,
+  "redact_handles": true,
+  "require_self_messages": true
+}
+

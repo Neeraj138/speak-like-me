@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Speak Like Me — v1 Review</title>
+  <style>
+    :root { color-scheme: light; --ink:#17211b; --muted:#627068; --paper:#f5f1e8; --card:#fffdf7; --line:#d8d1c3; --green:#176b48; --red:#a43c32; --amber:#a8680b; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    header { position:sticky; top:0; z-index:2; padding:18px max(22px,calc((100vw - 1040px)/2)); background:rgba(245,241,232,.96); border-bottom:1px solid var(--line); backdrop-filter:blur(8px); }
+    h1 { margin:0 0 4px; font:700 24px/1.2 ui-serif,Georgia,serif; }
+    .sub,.meta { color:var(--muted); font-size:14px; }
+    .progress { height:7px; margin-top:14px; background:#ded8cc; border-radius:10px; overflow:hidden; }
+    .progress > div { height:100%; width:0; background:var(--green); transition:width .2s; }
+    main { max-width:1040px; margin:25px auto 80px; padding:0 22px; }
+    .toolbar,.actions,.nav { display:flex; flex-wrap:wrap; gap:9px; align-items:center; }
+    .toolbar { justify-content:space-between; margin-bottom:16px; }
+    .guide { margin:0 0 16px; padding:12px 15px; border:1px solid #d7ccb5; border-radius:10px; background:#fff7df; color:#554a32; font-size:14px; }
+    select,button,input,textarea { font:inherit; }
+    select,button { border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; padding:8px 12px; }
+    button { cursor:pointer; }
+    button:hover { border-color:#8c938d; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; box-shadow:0 10px 28px rgba(44,39,28,.06); }
+    .chips { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:18px; }
+    .chip { padding:3px 8px; border-radius:99px; background:#eee9de; color:#536057; font-size:12px; }
+    .message { margin:10px 0; padding:12px 14px; border-radius:10px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .system { background:#ebe9e2; color:#59605b; font-size:13px; }
+    .user { background:#e8f0ec; margin-right:8%; }
+    .assistant { background:#eee8f4; margin-left:8%; }
+    .label { display:block; margin-bottom:4px; color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+    textarea { width:100%; min-height:100px; resize:vertical; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); padding:12px; }
+    #note { min-height:64px; margin-top:12px; }
+    .actions { margin-top:16px; }
+    .approve.active { background:var(--green); color:#fff; border-color:var(--green); }
+    .reject.active { background:var(--red); color:#fff; border-color:var(--red); }
+    .edit.active { background:var(--amber); color:#fff; border-color:var(--amber); }
+    .nav { justify-content:space-between; margin-top:16px; }
+    .count { font-variant-numeric:tabular-nums; color:var(--muted); }
+    .empty { padding:60px 20px; text-align:center; color:var(--muted); }
+    @media (max-width:600px) { .card { padding:15px; } .user,.assistant { margin-left:0; margin-right:0; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Casual chat v1 review</h1>
+    <div class="sub">Private and offline. Progress is stored only in this browser profile.</div>
+    <div class="progress"><div id="progressBar"></div></div>
+  </header>
+  <main>
+    <p class="guide"><strong>Review rule:</strong> approve when the context is coherent, the reply sounds like you, and no private detail or Tinglish remains. Reject unusable examples. Edit only when the context is good and the expected reply needs a small correction.</p>
+    <div class="toolbar">
+      <div>
+        <select id="statusFilter" aria-label="Filter by review status">
+          <option value="all">All examples</option><option value="pending">Pending</option>
+          <option value="approved">Approved</option><option value="rejected">Rejected</option><option value="edited">Edited</option>
+        </select>
+        <select id="splitFilter" aria-label="Filter by dataset split">
+          <option value="all">Train + validation</option><option value="train">Train</option><option value="validation">Validation</option>
+        </select>
+      </div>
+      <div><button id="importButton">Import decisions</button> <button id="exportButton">Export decisions</button></div>
+    </div>
+    <section class="card" id="card"></section>
+    <div class="nav"><button id="previous">← Previous</button><span class="count" id="position"></span><button id="next">Next →</button></div>
+    <input id="importFile" type="file" accept="application/json" hidden>
+  </main>
+  <script>
+    const examples = __REVIEW_DATA__;
+    const storageKey = 'speak-like-me:v1:review-decisions';
+    let decisions = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    let cursor = 0;
+    const el = id => document.getElementById(id);
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const filtered = () => examples.filter(x => {
+      const status = decisions[x.example_id]?.status || 'pending';
+      return (el('statusFilter').value === 'all' || status === el('statusFilter').value) && (el('splitFilter').value === 'all' || x.split === el('splitFilter').value);
+    });
+    function persist() { localStorage.setItem(storageKey, JSON.stringify(decisions)); updateProgress(); }
+    function updateProgress() {
+      const reviewed = examples.filter(x => decisions[x.example_id]?.status && decisions[x.example_id].status !== 'pending').length;
+      el('progressBar').style.width = `${100 * reviewed / examples.length}%`;
+      el('progressBar').title = `${reviewed} of ${examples.length} reviewed`;
+    }
+    function saveFields(example) {
+      if (!example || !el('completion')) return;
+      const d = decisions[example.example_id] || {status:'pending'};
+      d.edited_completion = el('completion').value;
+      d.note = el('note').value;
+      decisions[example.example_id] = d; persist();
+    }
+    function setStatus(status) {
+      const list=filtered(), example=list[cursor]; if (!example) return;
+      saveFields(example); decisions[example.example_id].status=status; persist(); render();
+    }
+    function render() {
+      const list=filtered(); if (cursor >= list.length) cursor=Math.max(0,list.length-1);
+      const example=list[cursor];
+      if (!example) { el('card').innerHTML='<div class="empty">No examples match this filter.</div>'; el('position').textContent='0 / 0'; return; }
+      const d=decisions[example.example_id] || {status:'pending',edited_completion:example.completion,note:''};
+      const conversation=example.prompt.map(m=>`<div class="message ${escapeHtml(m.role)}"><span class="label">${escapeHtml(m.role)}</span>${escapeHtml(m.content)}</div>`).join('');
+      el('card').innerHTML=`<div class="chips"><span class="chip">${escapeHtml(example.split)}</span><span class="chip">${escapeHtml(example.source)}</span>${example.focus.map(x=>`<span class="chip">${escapeHtml(x)}</span>`).join('')}</div>${conversation}<label class="label" for="completion">Expected reply — edit if needed</label><textarea id="completion">${escapeHtml(d.edited_completion ?? example.completion)}</textarea><label class="label" for="note" style="margin-top:12px">Review note</label><textarea id="note" placeholder="Why reject or edit this example?">${escapeHtml(d.note || '')}</textarea><div class="actions"><button class="approve ${d.status==='approved'?'active':''}" onclick="setStatus('approved')">Approve</button><button class="reject ${d.status==='rejected'?'active':''}" onclick="setStatus('rejected')">Reject</button><button class="edit ${d.status==='edited'?'active':''}" onclick="setStatus('edited')">Save edit</button><button onclick="setStatus('pending')">Reset to pending</button></div>`;
+      el('position').textContent=`${cursor+1} / ${list.length}`;
+    }
+    function move(delta) { const current=filtered()[cursor]; saveFields(current); const list=filtered(); cursor=Math.min(Math.max(0,cursor+delta),Math.max(0,list.length-1)); render(); }
+    el('previous').onclick=()=>move(-1); el('next').onclick=()=>move(1);
+    el('statusFilter').onchange=()=>{cursor=0;render()}; el('splitFilter').onchange=()=>{cursor=0;render()};
+    el('exportButton').onclick=()=>{
+      const payload={dataset_version:'v1',exported_at:new Date().toISOString(),sample_size:examples.length,decisions};
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}), a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download='v1-review-decisions.json'; a.click(); URL.revokeObjectURL(a.href);
+    };
+    el('importButton').onclick=()=>el('importFile').click();
+    el('importFile').onchange=async event=>{const parsed=JSON.parse(await event.target.files[0].text()); decisions=parsed.decisions||{};persist();cursor=0;render()};
+    document.addEventListener('keydown',event=>{if(event.target.tagName==='TEXTAREA')return;if(event.key==='ArrowLeft')move(-1);if(event.key==='ArrowRight')move(1);});
+    updateProgress(); render();
+  </script>
+</body>
+</html>
