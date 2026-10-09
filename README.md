@@ -1,257 +1,126 @@
-# speak-like-me privacy pipeline
+# Speak Like Me
 
-This project converts selected personal chat and writing exports into a sanitized,
-source-neutral JSONL format. It is deliberately a redaction stage, not yet a training
-dataset generator.
+I fine-tuned Qwen3-1.7B on my English chat messages to test if a small model
+could learn my casual writing style. I built a private data pipeline, trained a
+LoRA adapter, and ran it locally with llama.cpp. The model learned to produce
+short replies. It gave poor results for LinkedIn posts and source rewriting.
 
-The safe operating boundary is:
+## Architecture
 
-```text
-private raw exports (outside this repository)
-        -> local parsing and redaction
-        -> sanitized JSONL + content-free report
-        -> manual review
-        -> later dataset preparation
+```mermaid
+flowchart TD
+    W[WhatsApp chats] --> P[Local parsers]
+    T[Telegram chats] --> P
+    J[Journals and reflections] --> P
+
+    P --> C[Remove service data, media, and metadata]
+    C --> R[Redact private data with rules and Presidio]
+    R --> A[Run privacy audit]
+
+    A --> E[Keep English chat threads]
+    E --> D[Build conversation pairs]
+    D --> S[Split by conversation]
+    S --> Q[Train Qwen3-1.7B with QLoRA]
+    Q --> L[Save LoRA adapter]
+    L --> G[Convert adapter to GGUF]
+    G --> X[Test locally with llama.cpp]
+    X --> Y[Measure results and failures]
+
+    A --> B[Create 24 writing idea briefs]
+    B --> N[Do not use briefs for casual-chat SFT]
 ```
 
-The core pipeline has no third-party Python dependencies. It supports:
+I processed the exports on my computer. I did not add raw chats, cleaned
+datasets, journals, or model files to this repository.
 
-- WhatsApp individual-chat text exports;
-- Telegram Desktop JSON exports, including account exports containing several chats;
-- LinkedIn Messages CSV exports, with mandatory explicit conversation selection;
-- plain-text, Markdown and `{"text": "..."}` JSONL writings;
-- deterministic masking of email addresses, phone numbers, URLs, handles, IP addresses,
-  card numbers, credentials, tokens and private keys;
-- stable placeholders for participants and configured names, organizations, projects and
-  places;
-- optional local-only context detection through Ollama or Presidio;
-- strict residual-risk checks, private file permissions and reports that contain counts
-  and hashes but no message text.
+## Data pipeline
 
-## Keep raw data outside the repository
+| Source | Use |
+|---|---|
+| Selected WhatsApp chats | Casual-chat examples |
+| Selected Telegram chats | Casual-chat examples |
+| Journals and reflections | 24 writing idea briefs; not used for chat training |
+| Existing LinkedIn posts | Too few for a separate training dataset |
 
-Use a private directory such as:
+I collected 15,385 messages from five chat threads. I removed service messages,
+media records, duplicate targets, targets without user context, long targets,
+timestamps, and source names.
 
-```text
-~/speak-like-me-private/
-  raw/
-    whatsapp/
-    telegram/
-    linkedin/
-    writings/
-  selected/
-  sanitized/
-  reports/
-  redaction.private.json
-```
+The redaction stage detected names, organizations, locations, contact details,
+URLs, account values, payment-card numbers, passwords, one-time passwords, and
+access tokens. Automated redaction can miss contextual private information.
 
-The repository ignores `data/`, `private/`, and private configuration files, but keeping
-raw exports outside the repository provides a stronger boundary. Do not email raw exports
-or place them in a synchronized folder merely to run this tool.
+One thread contained English and romanized Telugu. I excluded its 7,330
+messages from the English v1 dataset. The final dataset contained 1,265 training
+examples and 486 validation examples. I used one complete conversation for
+validation.
 
-## Run without installing
+## Training
 
-From this repository:
+I used `Qwen/Qwen3-1.7B` with QLoRA on a Colab T4 GPU. The main settings were:
 
-```bash
-PYTHONPATH=src python -m speak_like_me --help
-```
+| Setting | Value |
+|---|---:|
+| Training epochs | 2 |
+| Maximum sequence length | 1,024 tokens |
+| LoRA rank | 16 |
+| LoRA alpha | 32 |
+| LoRA dropout | 0.05 |
+| Learning rate | 0.0001 |
+| Loss | Assistant completion only |
 
-To install an isolated command locally:
+Two training runs failed. The installed TRL version rejected one configuration
+argument. The Qwen chat template also did not provide assistant-token masks. I
+used an explicit prompt-and-completion format with completion-only loss. I also
+kept the Colab PyTorch version to prevent CUDA package conflicts. Training then
+completed.
 
-```bash
-uv venv
-uv pip install -e .
-```
+## Results
 
-## Create the private configuration
+The trained adapter was 69.8 MB. I converted it to a 34.9 MB GGUF adapter. I
+loaded it with a Q4_K_M base model in llama.cpp. Local inference used about 2 GB
+of memory and generated about 39 tokens per second on my laptop CPU.
 
-Copy `examples/synthetic/config.json` to the private directory and replace the fake values:
+For 100 held-out casual prompts, historical replies had a median length of 10
+words. The base-model median was 35.5 words. The SFT-model median was 8 words.
+The adapter learned reply length. I have not completed a human quality review,
+so this result does not prove that it learned my full style.
 
-```json
-{
-  "self_names": ["Your exact sender name in the exports"],
-  "custom_entities": {
-    "person": ["private names mentioned in messages"],
-    "company": ["employers and clients"],
-    "project": ["private project names"],
-    "location": ["identifying places"]
-  },
-  "allowed_terms": ["Python"],
-  "redact_urls": true,
-  "redact_handles": true,
-  "require_self_messages": true
-}
-```
+## Example failures
 
-This configuration is itself private because it contains the terms being removed. Keep it
-outside the repository. `self_names` must match the sender name used for your own messages.
-If it is wrong, the command stops rather than silently producing a dataset with no known
-self-authored messages.
+| Test conversation | SFT response | What failed | Probable cause |
+|---|---|---|---|
+| **User:** “write me a linkedin post on transformer architecture”<br><br>**User:** “where is the post?” | “Hey everyone, this is a post on how transformer architecture is different from RNN/LSTM.”<br><br>“I will write it and post it. You can view it directly from the &lt;URL&gt;” | The model wrote only an introduction. It then claimed that it would publish the post and invented a URL placeholder. | The training data had short chat replies and no LinkedIn task examples. |
+| **User:** “can u turn this to a linkedinpost?”<br><br>The prompt included an article about security risks for AI agents. | The model put the supplied article inside `<LinkedInPost>` tags. After a correction, it repeated almost the same article. | The model copied the source instead of writing a new post. | The training data had no source-to-post examples. |
 
-## WhatsApp
+I also tested the same source with a direct rewrite instruction. The base model
+produced a usable multi-paragraph rewrite. The SFT model produced only the title
+“Security Risks of AI Agents.” The adapter loaded correctly. The narrow casual
+dataset caused the failure.
 
-Export each chosen chat without media and place its `.txt` file in the private raw folder.
-Process a single export with:
+## Limitations and current status
 
-```bash
-PYTHONPATH=src python -m speak_like_me redact \
-  --source whatsapp \
-  --input ~/speak-like-me-private/raw/whatsapp/chat-001.txt \
-  --config ~/speak-like-me-private/redaction.private.json \
-  --output ~/speak-like-me-private/sanitized/chat-001.jsonl \
-  --report ~/speak-like-me-private/reports/chat-001.json
-```
+- The model has 1.7 billion parameters and limited capacity.
+- Fifty-six percent of the training replies had 10 words or fewer.
+- The validation data came from one conversation.
+- The mixed-language thread was excluded in full.
+- No LinkedIn model has been trained.
+- No preference optimization has been performed.
+- The adapter can retain information from its private training data. I did not
+  publish it.
 
-The parser supports common Android and iPhone timestamp formats and preserves multiline
-messages. WhatsApp service events are omitted.
+The current adapter is an experimental casual-chat checkpoint. It is not a
+general writing model. Preference optimization is the planned next experiment.
 
-## Telegram
+## Code
 
-Use Telegram Desktop's JSON export format and omit media. A single-chat export or an
-account export containing multiple chats is supported:
-
-```bash
-PYTHONPATH=src python -m speak_like_me redact \
-  --source telegram \
-  --input ~/speak-like-me-private/raw/telegram/result.json \
-  --config ~/speak-like-me-private/redaction.private.json \
-  --output ~/speak-like-me-private/sanitized/telegram.jsonl \
-  --report ~/speak-like-me-private/reports/telegram.json
-```
-
-For an account-wide Telegram export, list its chats locally and then select the required
-IDs. Message bodies are not printed:
-
-```bash
-PYTHONPATH=src python -m speak_like_me list-chats \
-  --source telegram \
-  --input ~/speak-like-me-private/raw/telegram/result.json
-
-PYTHONPATH=src python -m speak_like_me redact \
-  --source telegram \
-  --input ~/speak-like-me-private/raw/telegram/result.json \
-  --thread 'chosen-chat-id' \
-  --config ~/speak-like-me-private/redaction.private.json \
-  --output ~/speak-like-me-private/sanitized/telegram.jsonl \
-  --report ~/speak-like-me-private/reports/telegram.json
-```
-
-The command refuses to process a multi-chat Telegram export without a selection. A
-single-chat export does not require `--thread`.
-
-## LinkedIn
-
-LinkedIn supplies one Messages CSV containing several conversations. First list the chats
-locally; message bodies are never printed:
-
-```bash
-PYTHONPATH=src python -m speak_like_me list-chats \
-  --source linkedin \
-  --input ~/speak-like-me-private/raw/linkedin/Messages.csv
-```
-
-Select only the required conversation IDs:
-
-```bash
-PYTHONPATH=src python -m speak_like_me redact \
-  --source linkedin \
-  --input ~/speak-like-me-private/raw/linkedin/Messages.csv \
-  --thread 'chosen-conversation-id' \
-  --config ~/speak-like-me-private/redaction.private.json \
-  --output ~/speak-like-me-private/sanitized/linkedin.jsonl \
-  --report ~/speak-like-me-private/reports/linkedin.json
-```
-
-The command refuses to process LinkedIn data without at least one `--thread`. Repeat the
-option to select several conversations.
-
-## Other writings
-
-Plain text, Markdown, and JSONL files are accepted:
-
-```bash
-PYTHONPATH=src python -m speak_like_me redact \
-  --source writing \
-  --input ~/speak-like-me-private/raw/writings/ \
-  --config ~/speak-like-me-private/redaction.private.json \
-  --output ~/speak-like-me-private/sanitized/writings.jsonl \
-  --report ~/speak-like-me-private/reports/writings.json
-```
-
-The tool does not rewrite, correct or summarize your writing. It only masks detected text.
-
-## Optional local model check
-
-Ollama integration is disabled by default. When enabled, the program accepts only plain
-HTTP endpoints on `localhost`, `127.0.0.1`, or `::1`; proxies and redirects are disabled.
-The model is asked to identify exact substrings and cannot rewrite the message:
-
-```bash
-PYTHONPATH=src python -m speak_like_me redact \
-  --source whatsapp \
-  --input ~/speak-like-me-private/raw/whatsapp/chat-001.txt \
-  --config ~/speak-like-me-private/redaction.private.json \
-  --output ~/speak-like-me-private/sanitized/chat-001.jsonl \
-  --report ~/speak-like-me-private/reports/chat-001.json \
-  --ollama-model YOUR_LOCAL_MODEL
-```
-
-Verify that the model is already present locally before disconnecting the machine from the
-network. Model-assisted detection remains a review aid and is not a privacy guarantee.
-
-Presidio can also be enabled with `--presidio`. Its published Python support currently ends
-at Python 3.13, so use a Python 3.12 or 3.13 environment for that optional integration:
-
-```bash
-uv venv --python 3.13
-uv pip install -e '.[presidio]'
-```
-
-Presidio also requires a compatible local NLP model. Installation may download packages or
-models; perform installation before switching to an offline run.
-
-## Audit and manual review
-
-Run the deterministic audit after every redaction:
-
-```bash
-PYTHONPATH=src python -m speak_like_me audit \
-  --input ~/speak-like-me-private/sanitized/chat-001.jsonl \
-  --config ~/speak-like-me-private/redaction.private.json
-```
-
-The default redaction command is strict: if a known deterministic pattern remains, it writes
-no output. `--allow-review-flags` exists for debugging difficult exports, but such output is
-not ready to share.
-
-Even a passing audit requires manual review. Inspect a representative sample and search the
-sanitized files for names, organizations, project names, usernames, exact places and rare
-personal stories that the automated layers may not understand.
-
-## Output schema
-
-Each sanitized JSONL record has this structure:
-
-```json
-{
-  "author_role": "self",
-  "order": 1,
-  "source": "whatsapp",
-  "speaker": "<SELF>",
-  "text": "yeah, ill send it after the <COMPANY_1> call",
-  "thread_id": "whatsapp_thread_0001"
-}
-```
-
-Exact timestamps, original thread names, sender names, input paths and raw message text are
-not included in the output report. The `order` field retains conversation sequence without
-retaining the original time.
-
-## Test with synthetic data
+Run the tests with synthetic data:
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-Everything under `examples/synthetic/` is fabricated and safe for development tests.
+The repository includes the redaction code, dataset builders, training scripts,
+Colab notebooks, local llama.cpp launchers, and synthetic test fixtures. See
+[the privacy pipeline reference](docs/privacy-pipeline.md) for the detailed
+commands.
