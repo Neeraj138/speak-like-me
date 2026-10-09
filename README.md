@@ -11,27 +11,20 @@ short replies. It gave poor results for LinkedIn posts and source rewriting.
 flowchart TD
     W[WhatsApp chats] --> P[Local parsers]
     T[Telegram chats] --> P
-    J[Journals and reflections] --> P
+    J[My articles and diary entries] --> P
 
     P --> C[Remove service data, media, and metadata]
     C --> R[Redact private data with rules and Presidio]
     R --> A[Run privacy audit]
 
-    A --> E[Keep English chat threads]
-    E --> D[Build conversation pairs]
-    D --> S[Split by conversation]
-    S --> Q[Train Qwen3-1.7B with QLoRA]
-    Q --> L[Save LoRA adapter]
-    L --> G[Convert adapter to GGUF]
-    G --> X[Test locally with llama.cpp]
-    X --> Y[Measure results and failures]
-
-    A --> B[Create 24 writing idea briefs]
-    B --> N[Do not use briefs for casual-chat SFT]
+    A --> F[Fine-tune Qwen3-1.7B on casual chats only<br/>QLoRA · 2 epochs · rank 16]
+    F --> X[Test the LoRA locally with llama.cpp]
+    X --> Y[Review results and failures]
+    Y -. Update data or training settings .-> F
 ```
 
 I processed the exports on my computer. I did not add raw chats, cleaned
-datasets, journals, or model files to this repository.
+datasets, articles, diary entries, or model files to this repository.
 
 ## Data pipeline
 
@@ -39,7 +32,7 @@ datasets, journals, or model files to this repository.
 |---|---|
 | Selected WhatsApp chats | Casual-chat examples |
 | Selected Telegram chats | Casual-chat examples |
-| Journals and reflections | 24 writing idea briefs; not used for chat training |
+| My articles and diary entries | 24 writing idea briefs; not used for chat training |
 | Existing LinkedIn posts | Too few for a separate training dataset |
 
 I collected 15,385 messages from five chat threads. I removed service messages,
