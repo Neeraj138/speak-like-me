@@ -85,6 +85,7 @@ so this result does not prove that it learned my full style.
 |---|---|---|---|
 | **User:** “write me a linkedin post on transformer architecture”<br><br>**User:** “where is the post?” | “Hey everyone, this is a post on how transformer architecture is different from RNN/LSTM.”<br><br>“I will write it and post it. You can view it directly from the &lt;URL&gt;” | The model wrote only an introduction. It then claimed that it would publish the post and invented a URL placeholder. | The training data had short chat replies and no LinkedIn task examples. |
 | **User:** “can u turn this to a linkedinpost?”<br><br>The prompt included an article about security risks for AI agents. | The model put the supplied article inside `<LinkedInPost>` tags. After a correction, it repeated almost the same article. | The model copied the source instead of writing a new post. | The training data had no source-to-post examples. |
+| Long messages or pasted articles | Short chat prompts worked. Long inputs produced weak, incomplete, or repetitive responses. | Quality decreased as the prompt became longer. | Most training prompts were short. Long inputs were rare, and the 1,024-token training limit reduced exposure to them. |
 
 I also tested the same source with a direct rewrite instruction. The base model
 produced a usable multi-paragraph rewrite. The SFT model produced only the title
